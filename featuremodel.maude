@@ -1,0 +1,275 @@
+mod FEATURE-MODEL is protecting STRING .
+  sorts FeatureModel FeatureMapping FeatureTable Name .
+  sorts Feature      FeatureID      FeatureType  Features .
+  sorts Group        GroupID        GroupType    Groups .
+
+  subsort FeatureID      < Features .
+  subsort Group          < Groups .
+  subsort FeatureMapping < FeatureTable .
+
+  *** Constructors ***
+  --- FM(RootID, FT)
+  op FM     : FeatureID    FeatureTable -> FeatureModel   [ctor] .
+  op [_->_] : FeatureID    Feature      -> FeatureMapping [ctor format (d g o d d d)] .
+  op emptyT :                           -> FeatureTable   [ctor] .
+  op _+_    : FeatureTable FeatureTable -> FeatureTable   [ctor assoc comm id: emptyT format (d nss d d)] .
+
+  --- f(name, parentID, groups, featuretype)
+  op  f                  : Name     FeatureID Groups FeatureType -> Feature     [ctor format (b o)] .
+  op  noF                :                                       -> Features    [ctor] .
+  op  _::_               : Features Features                     -> Features    [ctor assoc comm id: noF] .
+  ops optional mandatory :                                       -> FeatureType [ctor] .
+
+  op  g          : GroupID GroupType Features -> Group     [ctor format (r o)] .
+  op  noG        :                            -> Groups    [ctor format (r o)] .
+  op  _::_       : Groups  Groups             -> Groups    [ctor assoc comm id: noG] .
+  ops AND OR ALTERNATIVE :                            -> GroupType [ctor] .
+
+  --- Define configurations as Feature model + list of operations
+  sorts Configuration Operations Operation .
+  subsort Operation < Operations .
+
+  op _#_   : FeatureModel Operations  -> Configuration [ctor format (ni ni ni ni)] .
+  op done  :                          -> Operations    [ctor format (g o)] .
+  op __    : Operations   Operations  -> Operations    [ctor assoc id: done format (d ni d)] .
+
+  *** Operations ***
+  op addFeature        : FeatureID Name GroupID FeatureType -> Operation [ctor] . --- (NewFid, NewName, TargetGroup, FType)
+  op removeFeature     : FeatureID                          -> Operation [ctor] .
+  op moveFeature       : FeatureID GroupID                  -> Operation [ctor] .
+  op renameFeature     : FeatureID Name                     -> Operation [ctor] .
+  op changeFeatureType : FeatureID FeatureType              -> Operation [ctor] .
+  op addGroup          : FeatureID GroupID GroupType        -> Operation [ctor] .
+  op removeGroup       : GroupID                            -> Operation [ctor] .
+  op changeGroupType   : GroupID   GroupType                -> Operation [ctor] .
+  op moveGroup         : GroupID   FeatureID                -> Operation [ctor] . --- (Gid, NewParentID)
+
+  var  Model                              : FeatureModel .
+  vars F F'                               : Feature      .
+  vars Fid Fid' ParentFid RootFid NewFid  : FeatureID    .
+  vars ParentOfTarget NewParent OldParent : FeatureID    .
+  vars FT FT' FT'' FT''' FT''''           : FeatureTable .
+  vars Name Name' NewName TargetName      : Name         .
+  vars Gs Gs'                             : Groups       .
+  vars Fs Fs'                             : Features     .
+  vars Gid TargetGroup NewGroup           : GroupID      .
+  vars GType GType'                       : GroupType    .
+  vars FType FType'                       : FeatureType  .
+  var  Ops                                : Operations   .
+
+  *** Auxiliary functions ***
+  sort Split .
+  op SplitError           :                             -> Split .
+  op split:_onFid:_;      : FeatureTable FeatureID      -> Split .
+  op split:_onGroupID:_;  : FeatureTable GroupID        -> Split .
+  op _++_                 : FeatureMapping FeatureTable -> Split [ctor] .
+
+  eq split: [Fid -> F] + FT onFid: Fid ; = [Fid -> F] ++ FT .
+  eq split: FT onFid: Fid ; = SplitError [owise print "ERROR: Feature with ID " Fid " does not exist."] .
+
+  eq split: [Fid -> f(Name, ParentFid, g(Gid, GType, Fs) :: Gs, FType)] + FT onGroupID: Gid ;
+          = [Fid -> f(Name, ParentFid, g(Gid, GType, Fs) :: Gs, FType)] ++ FT .
+  eq split: FT onGroupID: Gid ; = SplitError [owise print "ERROR: Group with ID " Gid " does not exist."] .
+
+  op  isValidType : FeatureTable FeatureID -> Bool .
+  ceq isValidType(FT + [Fid -> f(Name, ParentFid, Gs, FType)]
+                      + [ParentFid -> f(Name', Fid', g(Gid, GType, Fid :: Fs) :: Gs', FType')], Fid)
+                  = false
+                  if (FType ==  mandatory and  GType =/= AND)
+                  or (FType =/= optional  and (GType == OR or GType == ALTERNATIVE))
+                  [print "ERROR: Feature with ID " Fid " has type  " FType " but parent group (" Gid ") has type " GType ] .
+  eq  isValidType(FT, Fid) = true [owise] .
+
+  op allWellFormed : Features FeatureTable -> Bool .
+  eq allWellFormed(noF, FT)       = true .
+  eq allWellFormed(Fid :: Fs, FT) = isValidType(FT, Fid) and allWellFormed(Fs, FT) .
+
+  op notExists : FeatureID FeatureTable -> Bool .
+  eq notExists(Fid, [Fid -> F] + FT) = false [print "ERROR: Feature with id " Fid " already exists"] .
+  eq notExists(Fid, FT)              = true  [owise] .
+
+  op isUniqueName : Name FeatureTable -> Bool .
+  eq isUniqueName(Name, [Fid -> f(Name, ParentFid, Gs, FType)] + FT)
+    = false [print "ERROR: Name " Name " already exists in feature with id " Fid] .
+  eq isUniqueName(Name, FT) = true [owise] .
+
+  op notRoot : FeatureID FeatureID -> Bool .
+  eq notRoot(RootFid, RootFid) = false [print "ERROR: Feature with id " RootFid " is the root id"] .
+  eq notRoot(Fid,     RootFid) = true  [owise] .
+
+  op addFeatureToGroupError :                                -> FeatureTable .
+  op addFeatureToGroup      : FeatureTable GroupID FeatureID -> FeatureTable .
+  eq addFeatureToGroup(
+      FT + [ParentFid -> f(Name', Fid', g(Gid, GType,        Fs) :: Gs, FType)], Gid, Fid)
+    = FT + [ParentFid -> f(Name', Fid', g(Gid, GType, Fid :: Fs) :: Gs, FType)] .
+  eq addFeatureToGroup(FT, Gid, Fid)
+     = addFeatureToGroupError [owise print "ERROR: No feature with group " Gid " exists"] .
+
+  op parentOfGroupError :                      -> FeatureID .
+  op parentOfGroup      : FeatureTable GroupID -> FeatureID .
+  eq parentOfGroup(FT + [ParentFid -> f(Name, Fid, g(Gid, GType, Fs) :: Gs, FType)], Gid) = ParentFid .
+  eq parentOfGroup(FT, Gid) = parentOfGroupError [owise print "ERROR: No feature with group " Gid " exists"] .
+    
+  op parentGroupError :                        -> GroupID .
+  op parentGroup      : FeatureTable FeatureID -> GroupID .
+  eq parentGroup(FT + [ParentFid -> f(Name, Fid', g(Gid, GType, Fid :: Fs) :: Gs, FType)], Fid) = Gid .
+  eq parentGroup(FT, Fid) = parentGroupError [owise print "ERROR: Could not locate parent group of feature with ID " Fid] .
+
+  --- removeFeatureFromParent(FT, ParentFid, RemoveFid)
+  op removeFeatureFromParentError :                                  -> FeatureTable .
+  op removeFeatureFromParent      : FeatureTable FeatureID FeatureID -> FeatureTable .
+  eq removeFeatureFromParent(
+    FT + [ParentFid ->
+    f(TargetName, ParentOfTarget, g(TargetGroup, GType, Fid :: Fs) :: Gs, FType)], ParentFid, Fid)
+  = FT + [ParentFid ->
+    f(TargetName, ParentOfTarget, g(TargetGroup, GType,        Fs) :: Gs, FType)] .
+  eq removeFeatureFromParent(FT, ParentFid, Fid) = removeFeatureFromParentError
+     [owise print "ERROR: Could not remove feature " Fid " from parent feature " ParentFid] .
+
+  --- isSubFeature(target, temp, root, FT): check that temp is not a subfeature of target
+  op  isSubFeature : FeatureID FeatureID FeatureID FeatureTable -> Bool .
+  eq  isSubFeature(Fid, RootFid,   RootFid, FT) = false .
+  ceq isSubFeature(Fid, Fid,       RootFid, FT) = true
+    if Fid =/= RootFid [print "ERROR: Target feature is subfeature of feature with ID " Fid ] .
+  ceq isSubFeature(Fid, Fid,       RootFid, FT) = false if Fid == RootFid .
+  eq  isSubFeature(Fid, Fid',      RootFid, FT + [Fid' -> f(Name, ParentFid, Gs, FType)])
+    = isSubFeature(Fid, ParentFid, RootFid, FT + [Fid' -> f(Name, ParentFid, Gs, FType)]) [owise] .
+
+  --- allNotSubFeature(Fs, Fid, RootFid, FT)
+  --- Check for all features in Fs that Fid is not in their subtree
+  op allNotSubFeature : Features FeatureID FeatureID FeatureTable -> Bool .
+  eq allNotSubFeature(noF,       Fid', RootFid, FT)       = true .
+  eq allNotSubFeature(Fid :: Fs, Fid', RootFid, FT) =
+        not isSubFeature(Fid, Fid', RootFid, FT)
+    and allNotSubFeature(Fs,  Fid', RootFid, FT) .
+
+  op isUniqueGroupID : GroupID FeatureTable -> Bool .
+  eq isUniqueGroupID(Gid, [Fid -> f(Name, ParentFid, g(Gid, GType, Fs) :: Gs, FType)] + FT)
+     = false [print "ERROR: Group with id " Gid " already in feature with id " Fid] .
+  eq isUniqueGroupID(Gid, FT) = true [owise] .
+
+  op updateParentsError :                                 -> FeatureTable .
+  op updateParents      : FeatureTable Features FeatureID -> FeatureTable .
+  eq updateParents(FT, noF, NewParent) = FT .
+  eq updateParents([Fid -> f(Name, OldParent, Gs, FType)] + FT, Fid :: Fs, NewParent)
+   = updateParents([Fid -> f(Name, NewParent, Gs, FType)] + FT,        Fs, NewParent) .
+  eq updateParents(FT, Fid :: Fs, ParentFid) = updateParentsError
+     [owise print "ERROR: Feature with id " Fid " does not exists, and cannot be updated with parent " ParentFid] .
+
+  op isEmptyGroup : Groups -> Bool .
+  eq isEmptyGroup(noG) = true .
+  eq isEmptyGroup(Gs)  = false [owise print "ERROR: Non-empty list of groups! " Gs] .
+
+  op isEmptyFeatures : Features -> Bool .
+  eq isEmptyFeatures(noF) = true .
+  eq isEmptyFeatures(Fs)  = false [owise print "ERROR: Non-empty list of features! " Fs] .
+
+  crl [add-feature] :
+      FM(RootFid, FT)
+      # addFeature(NewFid, NewName, TargetGroup, FType) Ops
+    =>
+      FM(RootFid, FT'')
+      # Ops
+  if notExists(NewFid, FT)
+  /\ isUniqueName(NewName, FT)
+  /\ FT' := addFeatureToGroup(FT, TargetGroup, NewFid) /\ FT' =/= addFeatureToGroupError
+  /\ ParentFid := parentOfGroup(FT, TargetGroup) /\ ParentFid =/= parentOfGroupError
+  /\ FT'' := FT' + [NewFid -> f(NewName, ParentFid, noG, FType)]
+  /\ isValidType(FT'', NewFid) .
+
+  crl [remove-feature] :
+      FM(RootFid, FT)
+      # removeFeature(Fid) Ops
+    =>
+      FM(RootFid, FT'')
+      # Ops
+  if notRoot(Fid, RootFid)
+  /\ [Fid -> f(Name, ParentFid, Gs, FType)] ++ FT' := split: FT onFid: Fid ;
+  /\ isEmptyGroup(Gs)
+  /\ Gid := parentGroup(FT, Fid) /\ Gid =/= parentGroupError
+  /\ FT'' := removeFeatureFromParent(FT', ParentFid, Fid)
+  /\ FT'' =/= removeFeatureFromParentError .
+
+  crl [move-feature] :
+      FM(RootFid, FT)
+      # moveFeature(Fid, NewGroup) Ops
+    =>
+      FM(RootFid, FT'''')
+      # Ops
+  if notRoot(Fid, RootFid)
+  /\ [Fid -> f(Name, ParentFid, Gs, FType)] ++ FT' := split: FT onFid: Fid ;
+  /\ NewParent := parentOfGroup(FT, NewGroup) /\ NewParent =/= parentOfGroupError
+  /\ not isSubFeature(Fid, NewParent, RootFid, FT)
+  /\ FT'' := removeFeatureFromParent(FT', ParentFid, Fid) /\ FT'' =/= removeFeatureFromParentError
+  /\ FT''' := addFeatureToGroup(FT'', NewGroup, Fid) /\ FT''' =/= addFeatureToGroupError
+  /\ FT'''' := FT''' + [Fid -> f(Name, NewParent, Gs, FType)]
+  /\ isValidType(FT'''', Fid)
+  /\ Gid := parentGroup(FT, Fid) /\ Gid =/= parentGroupError .
+
+  crl [rename-feature] :
+      FM(RootFid, FT)
+      # renameFeature(Fid, NewName) Ops
+    =>
+      FM(RootFid, FT' + [Fid -> f(NewName, ParentFid, Gs, FType)])
+      # Ops
+  if [Fid -> f(Name, ParentFid, Gs, FType)] ++ FT' := split: FT onFid: Fid ;
+  /\ isUniqueName(NewName, FT) .
+
+  crl [change-feature-variation-type] :
+      FM(RootFid, FT)
+      # changeFeatureType(Fid, FType') Ops
+    =>
+      FM(RootFid, FT'')
+      # Ops
+  if notRoot(Fid, RootFid)
+  /\ [Fid -> f(Name, ParentFid, Gs, FType)] ++ FT' := split: FT onFid: Fid ;
+  /\ FT'' := FT' + [Fid -> f(Name, ParentFid, Gs, FType')]
+  /\ isValidType(FT'', Fid) .
+
+  crl [add-group] :
+      FM(RootFid, FT)
+      # addGroup(Fid, Gid, GType) Ops
+    =>
+      FM(RootFid, FT'
+        + [Fid -> f(Name, ParentFid, g(Gid, GType, noF) :: Gs, FType)])
+      # Ops
+  if [Fid -> f(Name, ParentFid, Gs, FType)] ++ FT' := split: FT onFid: Fid ;
+  /\ isUniqueGroupID(Gid, FT + [Fid -> f(Name, ParentFid, Gs, FType)]) .
+
+  crl [remove-group] :
+      FM(RootFid, FT)
+      # removeGroup(Gid) Ops
+    =>
+      FM(RootFid, FT' + [Fid -> f(Name, ParentFid, Gs, FType)])
+      # Ops
+  if [Fid -> f(Name, ParentFid, g(Gid, GType, Fs) :: Gs, FType)] ++ FT' := split: FT onGroupID: Gid ;
+  /\ isEmptyFeatures(Fs) .
+
+  crl [change-group-variation-type] :
+      FM(RootFid, FT)
+      # changeGroupType(Gid, GType) Ops
+    =>
+      FM(RootFid, FT'')
+      # Ops
+  if [ParentFid -> f(Name, ParentOfTarget, g(Gid, GType', Fs) :: Gs, FType)] ++ FT' := split: FT onGroupID: Gid ;
+  /\ FT'' := FT' + [ParentFid -> f(Name, ParentOfTarget, g(Gid, GType, Fs) :: Gs, FType)]
+  /\ allWellFormed(Fs, FT'') .
+
+  crl [move-group] :
+      FM(RootFid, FT)
+      # moveGroup(Gid, NewParent) Ops
+    =>
+      FM(RootFid, FT''')
+      # Ops
+  if [NewParent -> f(Name, Fid, Gs, FType)] ++ FT' := split: FT onFid: NewParent ;
+  /\ [OldParent -> f(Name', Fid', g(Gid, GType, Fs) :: Gs', FType')] ++ FT'' := split: FT' onGroupID: Gid ;
+  /\ FT''' := FT''
+           + [OldParent -> f(Name', Fid', Gs', FType')]
+           + [NewParent -> f(Name, Fid, g(Gid, GType, Fs) :: Gs, FType)]
+  /\ FT'''' := updateParents(FT''', Fs, NewParent) /\ FT'''' =/= updateParentsError
+  /\ allNotSubFeature(Fs, NewParent, RootFid, FT) .
+
+endm
+
+
+set print attribute on .

@@ -1,0 +1,32 @@
+load featuremodel.maude
+
+mod PARADOX is including FEATURE-MODEL . protecting STRING + NAT .
+  subsorts String < FeatureID GroupID Name .
+
+  ops car infotainment bluetooth auto carPlay assistance pilot distance noParent : -> FeatureID [ctor] .
+  ops car1 info1 info2 comfort1 pilot1 : -> GroupID [ctor] .  
+  op  model : -> FeatureModel .
+  op  plan : -> Operations .
+  op  init : -> Configuration .
+
+  eq model = FM(car,
+    [car -> f("Car", noParent, g(car1, AND, infotainment), mandatory)]
+  + [infotainment -> f("Infotainment System", car, g(info1, AND, bluetooth), mandatory)]
+  + [bluetooth -> f("Bluetooth", infotainment, noG, optional)]) .
+
+  eq plan = addGroup(infotainment, info2, ALTERNATIVE)                           
+            addFeature(auto, "Android Auto", info2, optional)           
+            addFeature(carPlay, "Apple Car Play", info2, optional)       
+            addFeature(assistance, "Comfort Systems", car1, optional)     
+            addGroup(assistance, comfort1, AND)                           
+            addFeature(pilot, "Parking Pilot", comfort1, optional)
+	    removeFeature(pilot) 
+            addGroup(pilot, pilot1, AND)                                  
+            addFeature(distance, "Distance Sensors", pilot1, mandatory) .
+
+  eq init = model # plan .
+    
+endm
+
+rew init .
+
