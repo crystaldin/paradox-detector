@@ -80,9 +80,9 @@ mod FEATURE-MODEL is protecting STRING .
                   [print "ERROR: Feature with ID " Fid " has type  " FType " but parent group (" Gid ") has type " GType ] .
   eq  isValidType(FT, Fid) = true [owise] .
 
-  op allWellFormed : Features FeatureTable -> Bool .
-  eq allWellFormed(noF, FT)       = true .
-  eq allWellFormed(Fid :: Fs, FT) = isValidType(FT, Fid) and allWellFormed(Fs, FT) .
+  op allValidTypes : Features FeatureTable -> Bool .
+  eq allValidTypes(noF, FT)       = true .
+  eq allValidTypes(Fid :: Fs, FT) = isValidType(FT, Fid) and allValidTypes(Fs, FT) .
 
   op notExists : FeatureID FeatureTable -> Bool .
   eq notExists(Fid, [Fid -> F] + FT) = false [print "ERROR: Feature with id " Fid " already exists"] .
@@ -253,7 +253,7 @@ mod FEATURE-MODEL is protecting STRING .
       # Ops
   if [ParentFid -> f(Name, ParentOfTarget, g(Gid, GType', Fs) :: Gs, FType)] ++ FT' := split: FT onGroupID: Gid ;
   /\ FT'' := FT' + [ParentFid -> f(Name, ParentOfTarget, g(Gid, GType, Fs) :: Gs, FType)]
-  /\ allWellFormed(Fs, FT'') .
+  /\ allValidTypes(Fs, FT'') .
 
   crl [move-group] :
       FM(RootFid, FT)
